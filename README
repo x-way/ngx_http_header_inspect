@@ -13,7 +13,7 @@ Synopsis
 
 Limitations
 	Currently only inspects the following headers: Range, If-Range,
-	If-Unmodified-Since, If-Modified-Since, Date
+	If-Unmodified-Since, If-Modified-Since, Date, Accept-Encoding
 
 Report Bugs
 	Create a ticket on the issue tracking interface of GitHub:
