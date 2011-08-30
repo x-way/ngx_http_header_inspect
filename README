@@ -5,6 +5,7 @@ Synopsis
 	location /foo {
 		inspect_headers on;
 		inspect_headers_log_violations on;
+		inspect_headers_log_uninspected on;
 		inspect_headers_block_violations on;
 
 		# only allow 3 range definitions in Range header
