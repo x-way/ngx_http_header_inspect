@@ -14,6 +14,7 @@
 typedef struct {
 	ngx_flag_t inspect;
 	ngx_flag_t log;
+	ngx_flag_t log_uninspected;
 	ngx_flag_t block;
 
 	ngx_uint_t range_max_bytesets;
@@ -25,6 +26,7 @@ static ngx_int_t ngx_header_inspect_init(ngx_conf_t *cf);
 static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen);
 static ngx_int_t ngx_header_inspect_entity_tag(u_char *data, ngx_uint_t maxlen);
 static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -57,6 +59,14 @@ static ngx_command_t ngx_header_inspect_commands[] = {
 		ngx_conf_set_flag_slot,
 		NGX_HTTP_LOC_CONF_OFFSET,
 		offsetof(ngx_header_inspect_loc_conf_t, block),
+		NULL
+	},
+	{
+		ngx_string("inspect_headers_log_uninspected"),
+		NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+		ngx_conf_set_flag_slot,
+		NGX_HTTP_LOC_CONF_OFFSET,
+		offsetof(ngx_header_inspect_loc_conf_t, log_uninspected),
 		NULL
 	},
 	{
@@ -640,6 +650,179 @@ static ngx_int_t ngx_header_inspect_entity_tag(u_char *data, ngx_uint_t maxlen) 
 	return NGX_OK;
 }
 
+static ngx_int_t ngx_header_inspect_parse_qvalue(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len) {
+
+	*len = 0;
+
+	if ((maxlen < 3) || (data[0] != 'q') || (data[1] != '=')) {
+		return NGX_ERROR;
+	}
+
+	if (data[2] == '0') {
+		if ((maxlen == 3) || (data[3] != '.')) {
+			*len = 3;
+			return NGX_OK;
+		}
+		if ((data[4] < '0') || (data[4] > '9')) {
+			*len = 4;
+			return NGX_OK;
+		}
+		if ((data[5] < '0') || (data[5] > '9')) {
+			*len = 5;
+			return NGX_OK;
+		}
+		if ((data[6] < '0') || (data[6] > '9')) {
+			*len = 6;
+		} else {
+			*len = 7;
+		}
+		return NGX_OK;
+	} else if (data[2] == '1') {
+		if ((maxlen == 3) || (data[3] != '.')) {
+			*len = 3;
+			return NGX_OK;
+		}
+		if (data[4] != '0') {
+			*len = 4;
+			return NGX_OK;
+		}
+		if (data[5] != '0') {
+			*len = 5;
+			return NGX_OK;
+		}
+		if (data[6] != '0') {
+			*len = 6;
+		} else {
+			*len = 7;
+		}
+		return NGX_OK;
+	} else {
+		*len = 2;
+		return NGX_ERROR;
+	}
+}
+
+static ngx_int_t ngx_header_inspect_parse_contentcoding(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len) {
+
+	if (maxlen < 1) {
+		*len = 0;
+		return NGX_ERROR;
+	}
+	*len = 1;
+
+	switch (data[0]) {
+		case '*':
+			return NGX_OK;
+			break;
+		case 'c':
+			if ( (maxlen < 8) || (ngx_strncmp("compress", data, 8) != 0)) {
+				return NGX_ERROR;
+			}
+			*len = 8;
+			break;
+		case 'd':
+			if ( (maxlen < 7) || (ngx_strncmp("deflate", data, 7) != 0)) {
+				return NGX_ERROR;
+			}
+			*len = 7;
+			break;
+		case 'e':
+			if ( (maxlen < 3) || (ngx_strncmp("exi", data, 3) != 0)) {
+				return NGX_ERROR;
+			}
+			*len = 3;
+			break;
+		case 'g':
+			if ( (maxlen < 4) || (ngx_strncmp("gzip", data, 4) != 0)) {
+				return NGX_ERROR;
+			}
+			*len = 4;
+			break;
+		case 'i':
+			if ( (maxlen < 8) || (ngx_strncmp("identity", data, 8) != 0)) {
+				return NGX_ERROR;
+			}
+			*len = 8;
+			break;
+		case 'p':
+			if ( (maxlen < 12) || (ngx_strncmp("pack200-gzip", data, 12) != 0)) {
+				return NGX_ERROR;
+			}
+			*len = 12;
+			break;
+		default:
+			return NGX_ERROR;
+	}
+
+	return NGX_OK;
+}
+
+static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_int_t rc = NGX_AGAIN;
+	ngx_uint_t i = 0;
+	ngx_uint_t v;
+
+	if ((value.len == 0) || ((value.len == 1) && (value.data[0] == '*'))) {
+		return NGX_OK;
+	}
+
+	while ( i < value.len) {
+		if (ngx_header_inspect_parse_contentcoding(&(value.data[i]), value.len-i, &v) != NGX_OK) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid content-coding at position %d in Accept-Encoding header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		i += v;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+		if (i == value.len) {
+			rc = NGX_OK;
+			break;
+		}
+		if (value.data[i] == ';') {
+			i++;
+			if (i >= value.len) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+				rc = NGX_ERROR;
+				break;
+			}
+			if ((value.data[i] == ' ') && (i < value.len)) {
+				i++;
+			}
+			if (ngx_header_inspect_parse_qvalue(&(value.data[i]), value.len-i, &v) != NGX_OK) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Encoding header \"%s\"", i, value.data);
+				rc = NGX_ERROR;
+				break;
+			}
+			i += v;
+			if ((value.data[i] == ' ') && (i < value.len)) {
+				i++;
+			}
+			if (i == value.len) {
+				rc = NGX_OK;
+				break;
+			}
+		}
+		if (value.data[i] != ',') {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Encoding header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		i++;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+	}
+
+	if (rc == NGX_AGAIN) {
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+		rc = NGX_ERROR;
+	}
+
+	return rc;
+}
+
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	if (((value.data[0] == 'W') && (value.data[1] == '/'))|| (value.data[0] == '"')) {
 	/* 1. entity-tag */
@@ -709,8 +892,17 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
+				} else if ((h[i].key.len == 15) && (ngx_strcmp("Accept-Encoding", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_acceptencoding_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else {
+					/* TODO: support for other headers */
+					if (conf->log_uninspected) {
+						ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0, "header_inspect: uninspected header \"%s: %s\"", h[i].key.data, h[i].value.data);
+					}
 				}
-				/* TODO: support for other headers */
 			}
 			part = part->next;
 		} while ( part != NULL );
@@ -732,6 +924,7 @@ static void *ngx_header_inspect_create_conf(ngx_conf_t *cf) {
 	conf->inspect = NGX_CONF_UNSET;
 	conf->log = NGX_CONF_UNSET;
 	conf->block = NGX_CONF_UNSET;
+	conf->log_uninspected = NGX_CONF_UNSET;
 
 	conf->range_max_bytesets = NGX_CONF_UNSET_UINT;
 
@@ -745,6 +938,7 @@ static char *ngx_header_inspect_merge_conf(ngx_conf_t *cf, void *parent, void *c
 	ngx_conf_merge_off_value(conf->inspect, prev->inspect, 0);
 	ngx_conf_merge_off_value(conf->log, prev->log, 1);
 	ngx_conf_merge_off_value(conf->block, prev->block, 0);
+	ngx_conf_merge_off_value(conf->log_uninspected, prev->log_uninspected, 0);
 
 	ngx_conf_merge_uint_value(conf->range_max_bytesets, prev->range_max_bytesets, 5);
 
