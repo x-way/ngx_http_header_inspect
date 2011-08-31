@@ -27,6 +27,7 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen);
 static ngx_int_t ngx_header_inspect_entity_tag(u_char *data, ngx_uint_t maxlen);
 static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -757,6 +758,124 @@ static ngx_int_t ngx_header_inspect_parse_contentcoding(u_char *data, ngx_uint_t
 	return NGX_OK;
 }
 
+static ngx_int_t ngx_header_inspect_parse_languagerange(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len) {
+	ngx_uint_t i;
+	u_char d;
+	ngx_uint_t alphacount = 0;
+
+	if (maxlen < 1) {
+		*len = 0;
+		return NGX_ERROR;
+	}
+
+	if (data[0] == '*') {
+		*len = 1;
+		return NGX_OK;
+	}
+
+	*len = 1;
+	for ( i = 0; i < maxlen; i++ ) {
+		d = data[i];
+		if (d == '-') {
+			if (alphacount == 0) {
+				*len = i;
+				return NGX_ERROR;
+			}
+			alphacount = 0;
+			continue;
+		}
+		if (
+			((d < 'a') || (d > 'z')) &&
+			((d < 'A') || (d > 'Z'))
+		) {
+			*len = i;
+			if (alphacount == 0) {
+				return NGX_ERROR;
+			} else {
+				return NGX_OK;
+			}
+		}
+		if (alphacount == 8) {
+			*len = i;
+			return NGX_ERROR;
+		}
+		alphacount++;
+	}
+
+	*len = i;
+	if (alphacount == 0) {
+		return NGX_ERROR;
+	} else {
+		return NGX_OK;
+	}
+}
+
+static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_int_t rc = NGX_AGAIN;
+	ngx_uint_t i = 0;
+	ngx_uint_t v;
+
+	if ((value.len == 0) || ((value.len == 1) && (value.data[0] == '*'))) {
+		return NGX_OK;
+	}
+
+	while ( i < value.len ) {
+		if (ngx_header_inspect_parse_languagerange(&(value.data[i]), value.len-i, &v) != NGX_OK) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid language-range at position %d in Accept-Language header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		i += v;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+		if (i == value.len) {
+			rc = NGX_OK;
+			break;
+		}
+		if (value.data[i] == ';') {
+			i++;
+			if (i >= value.len) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Language header \"%s\"", value.data);
+				rc = NGX_ERROR;
+				break;
+			}
+			if ((value.data[i] == ' ') && (i < value.len)) {
+				i++;
+			}
+			if (ngx_header_inspect_parse_qvalue(&(value.data[i]), value.len-i, &v) != NGX_OK) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Language header \"%s\"", i, value.data);
+				rc = NGX_ERROR;
+				break;
+			}
+			i += v;
+			if ((value.data[i] == ' ') && (i < value.len)) {
+				i++;
+			}
+			if (i == value.len) {
+				rc = NGX_OK;
+				break;
+			}
+		}
+		if (value.data[i] != ',') {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Language header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		i++;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+	}
+
+	if (rc == NGX_AGAIN) {
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Language header \"%s\"", value.data);
+		rc = NGX_ERROR;
+	}
+
+	return rc;
+}
+
 static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_int_t rc = NGX_AGAIN;
 	ngx_uint_t i = 0;
@@ -894,6 +1013,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 15) && (ngx_strcmp("Accept-Encoding", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_acceptencoding_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 15) && (ngx_strcmp("Accept-Language", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_acceptlanguage_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
