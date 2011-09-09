@@ -30,7 +30,7 @@ static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *
 static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
-static ngx_int_t ngx_header_inspect_maxforwards_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_digit_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
@@ -918,17 +918,21 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_insp
 	return rc;
 }
 
-static ngx_int_t ngx_header_inspect_maxforwards_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+static ngx_int_t ngx_header_inspect_digit_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i = 0;
 
 	if ( value.len <= 0 ) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Max-Forwards header \"%s\" is empty", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: %s header \"%s\" is empty", header, value.data);
+		}
 		return NGX_ERROR;
 	}
 
 	for ( i = 0; i < value.len; i++ ) {
 		if ( (value.data[i] < '0') || (value.data[i] > '9') ) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid digit at position %d in Max-Forwards header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid digit at position %d in %s header \"%s\"", i, header, value.data);
+			}
 			return NGX_ERROR;
 		}
 	}
@@ -1225,8 +1229,13 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
+				} else if ((h[i].key.len == 14) && (ngx_strcmp("Content-Length", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_digit_header("Content-Length", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
 				} else if ((h[i].key.len == 12) && (ngx_strcmp("Max-Forwards", h[i].key.data) == 0) ) {
-					rc = ngx_header_inspect_maxforwards_header(conf, r->connection->log, h[i].value);
+					rc = ngx_header_inspect_digit_header("Max-Forwards", conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
