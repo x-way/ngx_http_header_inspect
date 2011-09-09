@@ -883,13 +883,17 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_insp
 	}
 
 	if ( value.len < 2 ) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: %s header \"%s\" too short", header, value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: %s header \"%s\" too short", header, value.data);
+		}
 		return NGX_ERROR;
 	}
 
 	while ( i < value.len ) {
 		if ( ngx_header_inspect_parse_entity_tag(&(value.data[i]), value.len-i, &v) != NGX_OK ) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid entity-tag at position %d in %s header \"%s\"", i, header, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid entity-tag at position %d in %s header \"%s\"", i, header, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -902,7 +906,9 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_insp
 			break;
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in %s header \"%s\"", i, header, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in %s header \"%s\"", i, header, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -913,7 +919,9 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_insp
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of %s header \"%s\"", header, value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of %s header \"%s\"", header, value.data);
+		}
 		rc = NGX_ERROR;
 	}
 
@@ -953,7 +961,9 @@ static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_
 
 	while ( i < value.len ) {
 		if (ngx_header_inspect_parse_charset(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid charset at position %d in Accept-Charset header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid charset at position %d in Accept-Charset header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -968,7 +978,9 @@ static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_
 		if (value.data[i] == ';') {
 			i++;
 			if (i >= value.len) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Charset header \"%s\"", value.data);
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Charset header \"%s\"", value.data);
+				}
 				rc = NGX_ERROR;
 				break;
 			}
@@ -976,7 +988,9 @@ static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_
 				i++;
 			}
 			if (ngx_header_inspect_parse_qvalue(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Charset header \"%s\"", i, value.data);
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Charset header \"%s\"", i, value.data);
+				}
 				rc = NGX_ERROR;
 				break;
 			}
@@ -990,7 +1004,9 @@ static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_
 			}
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Charset header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Charset header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1001,7 +1017,9 @@ static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Charset header \"%s\"", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Charset header \"%s\"", value.data);
+		}
 		rc = NGX_ERROR;
 	}
 
@@ -1014,19 +1032,25 @@ static ngx_int_t ngx_header_inspect_contentlanguage_header(ngx_header_inspect_lo
 	ngx_uint_t v;
 
 	if ((value.len == 0) || ((value.len == 1) && (value.data[0] == '*'))) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Language header \"%s\" too short", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Language header \"%s\" too short", value.data);
+		}
 		return NGX_ERROR;
 	}
 
 	while ( i < value.len ) {
 		if (value.data[i] == '*') {
 		/* hack, to prevent parse_languagerange from matching '*' */
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Language header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Language header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
 		if (ngx_header_inspect_parse_languagerange(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid language-range at position %d in Content-Language header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid language-range at position %d in Content-Language header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1039,7 +1063,9 @@ static ngx_int_t ngx_header_inspect_contentlanguage_header(ngx_header_inspect_lo
 			break;
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Language header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Language header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1050,7 +1076,9 @@ static ngx_int_t ngx_header_inspect_contentlanguage_header(ngx_header_inspect_lo
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Content-Language header \"%s\"", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Content-Language header \"%s\"", value.data);
+		}
 		rc = NGX_ERROR;
 	}
 
@@ -1069,7 +1097,9 @@ static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc
 
 	while ( i < value.len ) {
 		if (ngx_header_inspect_parse_languagerange(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid language-range at position %d in Accept-Language header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid language-range at position %d in Accept-Language header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1084,7 +1114,9 @@ static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc
 		if (value.data[i] == ';') {
 			i++;
 			if (i >= value.len) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Language header \"%s\"", value.data);
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Language header \"%s\"", value.data);
+				}
 				rc = NGX_ERROR;
 				break;
 			}
@@ -1092,7 +1124,9 @@ static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc
 				i++;
 			}
 			if (ngx_header_inspect_parse_qvalue(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Language header \"%s\"", i, value.data);
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Language header \"%s\"", i, value.data);
+				}
 				rc = NGX_ERROR;
 				break;
 			}
@@ -1106,7 +1140,9 @@ static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc
 			}
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Language header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Language header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1117,7 +1153,9 @@ static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Language header \"%s\"", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Language header \"%s\"", value.data);
+		}
 		rc = NGX_ERROR;
 	}
 
@@ -1130,18 +1168,24 @@ static ngx_int_t ngx_header_inspect_contentencoding_header(ngx_header_inspect_lo
 	ngx_uint_t v;
 
 	if ((value.len == 0) || ((value.len == 1) && (value.data[0] == '*'))) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Encoding header \"%s\" too short", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Encoding header \"%s\" too short", value.data);
+		}
 		return NGX_ERROR;
 	}
 
 	while ( i < value.len) {
 		if (value.data[i] == '*') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Encoding header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Encoding header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
 		if (ngx_header_inspect_parse_contentcoding(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid content-coding at position %d in Content-Encoding header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid content-coding at position %d in Content-Encoding header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1154,7 +1198,9 @@ static ngx_int_t ngx_header_inspect_contentencoding_header(ngx_header_inspect_lo
 			break;
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Encoding header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Encoding header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1165,7 +1211,9 @@ static ngx_int_t ngx_header_inspect_contentencoding_header(ngx_header_inspect_lo
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Content-Encoding header \"%s\"", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Content-Encoding header \"%s\"", value.data);
+		}
 		rc = NGX_ERROR;
 	}
 
@@ -1183,7 +1231,9 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 
 	while ( i < value.len) {
 		if (ngx_header_inspect_parse_contentcoding(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid content-coding at position %d in Accept-Encoding header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid content-coding at position %d in Accept-Encoding header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1198,7 +1248,9 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 		if (value.data[i] == ';') {
 			i++;
 			if (i >= value.len) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+				}
 				rc = NGX_ERROR;
 				break;
 			}
@@ -1206,7 +1258,9 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 				i++;
 			}
 			if (ngx_header_inspect_parse_qvalue(&(value.data[i]), value.len-i, &v) != NGX_OK) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Encoding header \"%s\"", i, value.data);
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid qvalue at position %d in Accept-Encoding header \"%s\"", i, value.data);
+				}
 				rc = NGX_ERROR;
 				break;
 			}
@@ -1220,7 +1274,9 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 			}
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Encoding header \"%s\"", i, value.data);
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Accept-Encoding header \"%s\"", i, value.data);
+			}
 			rc = NGX_ERROR;
 			break;
 		}
@@ -1231,7 +1287,9 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+		}
 		rc = NGX_ERROR;
 	}
 
