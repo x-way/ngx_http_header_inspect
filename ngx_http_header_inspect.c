@@ -31,7 +31,7 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_maxforwards_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
-static ngx_int_t ngx_header_inspect_ifmatch_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -871,7 +871,7 @@ static ngx_int_t ngx_header_inspect_parse_languagerange(u_char *data, ngx_uint_t
 	}
 }
 
-static ngx_int_t ngx_header_inspect_ifmatch_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_int_t rc = NGX_AGAIN;
 	ngx_uint_t i = 0;
 	ngx_uint_t v;
@@ -881,13 +881,13 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(ngx_header_inspect_loc_conf_t
 	}
 
 	if ( value.len < 2 ) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: If-Match header \"%s\" too short", value.data);
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: %s header \"%s\" too short", header, value.data);
 		return NGX_ERROR;
 	}
 
 	while ( i < value.len ) {
 		if ( ngx_header_inspect_parse_entity_tag(&(value.data[i]), value.len-i, &v) != NGX_OK ) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid entity-tag at position %d in If-Match header \"%s\"", i, value.data);
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid entity-tag at position %d in %s header \"%s\"", i, header, value.data);
 			rc = NGX_ERROR;
 			break;
 		}
@@ -900,7 +900,7 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(ngx_header_inspect_loc_conf_t
 			break;
 		}
 		if (value.data[i] != ',') {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in If-Match header \"%s\"", i, value.data);
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in %s header \"%s\"", i, header, value.data);
 			rc = NGX_ERROR;
 			break;
 		}
@@ -911,7 +911,7 @@ static ngx_int_t ngx_header_inspect_ifmatch_header(ngx_header_inspect_loc_conf_t
 	}
 
 	if (rc == NGX_AGAIN) {
-		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of If-Match header \"%s\"", value.data);
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of %s header \"%s\"", header, value.data);
 		rc = NGX_ERROR;
 	}
 
@@ -1226,7 +1226,12 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
 				} else if ((h[i].key.len == 8) && (ngx_strcmp("If-Match", h[i].key.data) == 0) ) {
-					rc = ngx_header_inspect_ifmatch_header(conf, r->connection->log, h[i].value);
+					rc = ngx_header_inspect_ifmatch_header("If-Match", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 13) && (ngx_strcmp("If-None-Match", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_ifmatch_header("If-None-Match", conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
