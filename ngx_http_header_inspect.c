@@ -1209,6 +1209,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
+				} else if ((h[i].key.len == 7) && (ngx_strcmp("Expires", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_date_header(conf, r->connection->log, "Expires", h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
 				} else if ((h[i].key.len == 13) && (ngx_strcmp("Last-Modified", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_date_header(conf, r->connection->log, "Last-Modified", h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
