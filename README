@@ -15,7 +15,7 @@ Synopsis
 Limitations
 	Currently only inspects the following headers: Range, If-Range,
 	If-Unmodified-Since, If-Modified-Since, Date, Accept-Encoding,
-	Accept-Language, Accept-Charset, Max-Forwards
+	Accept-Language, Accept-Charset, Max-Forwards, If-Match
 
 Report Bugs
 	Create a ticket on the issue tracking interface of GitHub:
