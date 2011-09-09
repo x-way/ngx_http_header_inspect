@@ -34,6 +34,7 @@ static ngx_int_t ngx_header_inspect_contentlanguage_header(ngx_header_inspect_lo
 static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_digit_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_allow_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -1296,6 +1297,67 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_allow_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_int_t rc = NGX_AGAIN;
+	ngx_uint_t i = 0;
+
+	if ( value.len == 0 ) {
+		return NGX_OK;
+	}
+
+	while ( i < value.len ) {
+		if ( (i+3 <= value.len) && (ngx_strncmp("GET", &(value.data[i]), 3) == 0) ) {
+			i += 3;
+		} else if ( (i+4 <= value.len) && (ngx_strncmp("POST", &(value.data[i]), 4) == 0) ) {
+			i += 4;
+		} else if ( (i+3 <= value.len) && (ngx_strncmp("PUT", &(value.data[i]), 3) == 0) ) {
+			i += 3;
+		} else if ( (i+4 <= value.len) && (ngx_strncmp("HEAD", &(value.data[i]), 4) == 0) ) {
+			i += 4;
+		} else if ( (i+6 <= value.len) && (ngx_strncmp("DELETE", &(value.data[i]), 6) == 0) ) {
+			i += 6;
+		} else if ( (i+7 <= value.len) && (ngx_strncmp("OPTIONS", &(value.data[i]), 7) == 0) ) {
+			i += 7;
+		} else if ( (i+5 <= value.len) && (ngx_strncmp("TRACE", &(value.data[i]), 5) == 0) ) {
+			i += 5;
+		} else if ( (i+7 <= value.len) && (ngx_strncmp("CONNECT", &(value.data[i]), 7) == 0) ) {
+			i += 7;
+		} else {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal method at position %d in Allow header \"%s\"", i, value.data);
+				rc = NGX_ERROR;
+				break;
+			}
+		}
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+		if (i == value.len) {
+			rc = NGX_OK;
+			break;
+		}
+		if (value.data[i] != ',') {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Allow header \"%s\"", i, value.data);
+			}
+			rc = NGX_ERROR;
+			break;
+		}
+		i++;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+	}
+	if (rc == NGX_AGAIN) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Allow header \"%s\"", value.data);
+		}
+		rc = NGX_ERROR;
+	}
+
+	return rc;
+}
+
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t v = 0;
 
@@ -1419,6 +1481,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 13) && (ngx_strcmp("If-None-Match", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_ifmatch_header("If-None-Match", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 5) && (ngx_strcmp("Allow", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_allow_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
