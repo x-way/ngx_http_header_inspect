@@ -29,6 +29,7 @@ static ngx_int_t ngx_header_inspect_parse_languagerange(u_char *data, ngx_uint_t
 static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_contentlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_digit_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifmatch_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
@@ -1006,6 +1007,56 @@ static ngx_int_t ngx_header_inspect_acceptcharset_header(ngx_header_inspect_loc_
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_contentlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_int_t rc = NGX_AGAIN;
+	ngx_uint_t i = 0;
+	ngx_uint_t v;
+
+	if ((value.len == 0) || ((value.len == 1) && (value.data[0] == '*'))) {
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Language header \"%s\" too short", value.data);
+		return NGX_ERROR;
+	}
+
+	while ( i < value.len ) {
+		if (value.data[i] == '*') {
+		/* hack, to prevent parse_languagerange from matching '*' */
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Language header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		if (ngx_header_inspect_parse_languagerange(&(value.data[i]), value.len-i, &v) != NGX_OK) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid language-range at position %d in Content-Language header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		i += v;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+		if (i == value.len) {
+			rc = NGX_OK;
+			break;
+		}
+		if (value.data[i] != ',') {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Content-Language header \"%s\"", i, value.data);
+			rc = NGX_ERROR;
+			break;
+		}
+		i++;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+	}
+
+	if (rc == NGX_AGAIN) {
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Content-Language header \"%s\"", value.data);
+		rc = NGX_ERROR;
+	}
+
+	return rc;
+
+}
+
 static ngx_int_t ngx_header_inspect_acceptlanguage_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_int_t rc = NGX_AGAIN;
 	ngx_uint_t i = 0;
@@ -1221,6 +1272,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 15) && (ngx_strcmp("Accept-Encoding", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_acceptencoding_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 16) && (ngx_strcmp("Content-Language", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_contentlanguage_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
