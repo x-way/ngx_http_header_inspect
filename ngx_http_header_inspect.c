@@ -17,7 +17,7 @@ typedef struct {
 	ngx_flag_t log_uninspected;
 	ngx_flag_t block;
 
-	ngx_uint_t range_max_bytesets;
+	ngx_uint_t range_max_byteranges;
 } ngx_header_inspect_loc_conf_t;
 
 
@@ -73,11 +73,11 @@ static ngx_command_t ngx_header_inspect_commands[] = {
 		NULL
 	},
 	{
-		ngx_string("inspect_headers_range_max_bytesets"),
+		ngx_string("inspect_headers_range_max_byteranges"),
 		NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
 		ngx_conf_set_num_slot,
 		NGX_HTTP_LOC_CONF_OFFSET,
-		offsetof(ngx_header_inspect_loc_conf_t, range_max_bytesets),
+		offsetof(ngx_header_inspect_loc_conf_t, range_max_byteranges),
 		NULL
 	},
 	ngx_null_command
@@ -219,9 +219,9 @@ static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *
 				rc = NGX_ERROR;
 		}
 
-		if (setcount > conf->range_max_bytesets) {
+		if (setcount > conf->range_max_byteranges) {
 			if ( conf->log ) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Range header contains more than %d bytesets", conf->range_max_bytesets);
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Range header contains more than %d byteranges", conf->range_max_byteranges);
 			}
 			return NGX_ERROR;
 			break;
@@ -1201,7 +1201,7 @@ static void *ngx_header_inspect_create_conf(ngx_conf_t *cf) {
 	conf->block = NGX_CONF_UNSET;
 	conf->log_uninspected = NGX_CONF_UNSET;
 
-	conf->range_max_bytesets = NGX_CONF_UNSET_UINT;
+	conf->range_max_byteranges = NGX_CONF_UNSET_UINT;
 
 	return conf;
 }
@@ -1215,7 +1215,7 @@ static char *ngx_header_inspect_merge_conf(ngx_conf_t *cf, void *parent, void *c
 	ngx_conf_merge_off_value(conf->block, prev->block, 0);
 	ngx_conf_merge_off_value(conf->log_uninspected, prev->log_uninspected, 0);
 
-	ngx_conf_merge_uint_value(conf->range_max_bytesets, prev->range_max_bytesets, 5);
+	ngx_conf_merge_uint_value(conf->range_max_byteranges, prev->range_max_byteranges, 5);
 
 	return NGX_CONF_OK;
 }

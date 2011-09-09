@@ -9,7 +9,7 @@ Synopsis
 		inspect_headers_block_violations on;
 
 		# only allow 3 range definitions in Range header
-		inspect_headers_range_max_bytesets 3;
+		inspect_headers_range_max_byteranges 3;
 	}
 
 Limitations
