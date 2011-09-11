@@ -1306,27 +1306,61 @@ static ngx_int_t ngx_header_inspect_host_header(ngx_header_inspect_loc_conf_t *c
 		return NGX_OK;
 	}
 
-	while ( i < value.len ) {
-		d = value.data[i];
-
-		if ( 
-			((d < '0') || (d > '9'))
-			&& ((d < 'a') || (d > 'z'))
-			&& ((d < 'A') || (d > 'Z'))
-			&& (d != '.') && (d != '-')
-			&& ((d != ':') || (i == 0))
-		) {
+	if ( value.data[0] == '[' ) {
+		i++;
+		/* IPv6 address */
+		while ( i < value.len ) {
+			d = value.data[i];
+			if (
+				((d < '0') || (d > '9'))
+				&& ((d < 'a') || (d > 'z'))
+				&& ((d < 'A') || (d > 'Z'))
+				&& (d != ':') && (d != ']')
+			) {
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Host header \"%s\"", i, value.data);
+				}
+				return NGX_ERROR;
+			}
+			if ( d == ']' ) {
+				break;
+			}
+			i++;
+		}
+		if ( d != ']' ) {
 			if ( conf->log ) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Host header \"%s\"", i, value.data);
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Host header \"%s\"", value.data);
 			}
 			return NGX_ERROR;
-			break;
 		}
-		if ( d == ':' ) {
-			break;
+		if ( i+1 < value.len ) {
+			d = value.data[i+1];
 		}
 		i++;
+	} else {
+		/* IPv4 address or domain name */
+		while ( i < value.len ) {
+			d = value.data[i];
+
+			if ( 
+				((d < '0') || (d > '9'))
+				&& ((d < 'a') || (d > 'z'))
+				&& ((d < 'A') || (d > 'Z'))
+				&& (d != '.') && (d != '-')
+				&& ((d != ':') || (i == 0))
+			) {
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Host header \"%s\"", i, value.data);
+				}
+				return NGX_ERROR;
+			}
+			if ( d == ':' ) {
+				break;
+			}
+			i++;
+		}
 	}
+
 	if ( (d == ':') && (i+1 < value.len) ) {
 		i++;
 		for ( ; i < value.len ; i++ ) {
