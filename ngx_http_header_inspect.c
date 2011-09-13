@@ -1469,7 +1469,8 @@ static ngx_int_t ngx_header_inspect_host_header(ngx_header_inspect_loc_conf_t *c
 				((d < '0') || (d > '9'))
 				&& ((d < 'a') || (d > 'z'))
 				&& ((d < 'A') || (d > 'Z'))
-				&& (d != ':') && (d != ']')
+				&& (d != ':') && (d != '.')
+				&& (d != ']')
 			) {
 				if ( conf->log ) {
 					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Host header \"%s\"", i, value.data);
