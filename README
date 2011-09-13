@@ -17,7 +17,7 @@ Limitations
 	If-Unmodified-Since, If-Modified-Since, Date, Accept-Encoding,
 	Accept-Language, Accept-Charset, Max-Forwards, If-Match,
 	If-None-Match, Last-Modified, Content-Length, Expires,
-	Content-Language, Content-Encoding, Allow, Host
+	Content-Language, Content-Encoding, Allow, Host, Accept
 
 Report Bugs
 	Create a ticket on the issue tracking interface of GitHub:
