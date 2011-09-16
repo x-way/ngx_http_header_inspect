@@ -771,23 +771,18 @@ static ngx_int_t ngx_header_inspect_parse_contentcoding(u_char *data, ngx_uint_t
 }
 
 static ngx_int_t ngx_header_inspect_parse_mediatype(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len) {
-	ngx_uint_t i;
+	ngx_uint_t i = 0;
 	u_char d;
 	ngx_uint_t secondpart = 0;
+	ngx_uint_t parameter = 0;
 
 	if (maxlen < 1) {
 		*len = 0;
 		return NGX_ERROR;
 	}
 
-	/* TODO: check with RFC if single '*' is valid */
-//	if (data[0] == '*') {
-//		*len = 1;
-//		return NGX_OK;
-//	}
-
 	*len = 1;
-	for ( i = 0; i < maxlen; i++ ) {
+	while ( i < maxlen ) {
 		d = data[i];
 		if ( d == '/' ) {
 			if ( i < 1 ) {
@@ -796,6 +791,7 @@ static ngx_int_t ngx_header_inspect_parse_mediatype(u_char *data, ngx_uint_t max
 			} else {
 				if ( secondpart == 0 ) {
 					secondpart = 1;
+					i++;
 					continue;
 				} else {
 					*len = i;
@@ -817,8 +813,84 @@ static ngx_int_t ngx_header_inspect_parse_mediatype(u_char *data, ngx_uint_t max
 			if (secondpart == 0) {
 				return NGX_ERROR;
 			} else {
+				if ( d == ';' ) {
+					parameter = 1;
+					break;
+				} else {
+					return NGX_OK;
+				}
+			}
+		}
+		i++;
+	}
+
+	if ( parameter ) {
+		if ( i+4 > maxlen ) {
+			return NGX_ERROR;
+		}
+		while ( i < maxlen ) {
+			if ( data[i] != ';' ) {
+				*len = i;
 				return NGX_OK;
 			}
+			i++;
+
+			while ( (i < maxlen) && (data[i] == ' ') ) { i++; }
+			if ( i == maxlen ) {
+				*len = i;
+				return NGX_ERROR;
+			}
+
+			/* attribute */
+			while ( i < maxlen ) {
+				d = data[i];
+
+				if ( d == '=' ) {
+					break;
+				}
+
+				if (
+					((d < '0') || (d > '9')) &&
+					((d < 'a') || (d > 'z')) &&
+					((d < 'A') || (d > 'Z')) &&
+					(d != '-') && (d != '_') &&
+					(d != '+') && (d != '.') &&
+					(d != ':') && (d != '*')
+				) {
+					*len = i;
+					return NGX_ERROR;
+				}
+				i++;
+			}
+			if ( i == maxlen ) {
+				*len = i;
+				return NGX_ERROR;
+			}
+			i++;
+
+			/* value */
+			/* TODO: what if value is double-quoted? */
+			while ( i < maxlen ) {
+				d = data[i];
+
+				if ( d == ';' ) {
+					break;
+				}
+
+				if (
+					((d < '0') || (d > '9')) &&
+					((d < 'a') || (d > 'z')) &&
+					((d < 'A') || (d > 'Z')) &&
+					(d != '-') && (d != '_') &&
+					(d != '+') && (d != '.') &&
+					(d != ':') && (d != '*')
+				) {
+					*len = i;
+					return NGX_OK;
+				}
+				i++;
+			}
+			while ( (i < maxlen) && (data[i] == ' ') ) { i++; }
 		}
 	}
 
@@ -1423,8 +1495,7 @@ static ngx_int_t ngx_header_inspect_accept_header(ngx_header_inspect_loc_conf_t 
 	ngx_uint_t i = 0;
 	ngx_uint_t v;
 
-	/* TODO: check with RFC if single '*' is valid */
-	if ((value.len == 0) || ((value.len == 1) && (value.data[0] == '*'))) {
+	if (value.len == 0) {
 		return NGX_OK;
 	}
 
@@ -1463,6 +1534,7 @@ static ngx_int_t ngx_header_inspect_accept_header(ngx_header_inspect_loc_conf_t 
 				rc = NGX_ERROR;
 				break;
 			}
+			/* TODO: parse additional parameters */
 			i += v;
 			if ((value.data[i] == ' ') && (i < value.len)) {
 				i++;
