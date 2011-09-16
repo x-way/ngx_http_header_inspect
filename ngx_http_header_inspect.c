@@ -1362,17 +1362,60 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 }
 
 static ngx_int_t ngx_header_inspect_connection_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
-	/* TODO: check with RFC for allowed header values */
-	if ( (value.len == 5) && (ngx_strcmp("close", value.data) == 0) ) {
-		return NGX_OK;
-	} else if ( (value.len == 10) && (ngx_strcmp("keep-alive", value.data) == 0) ) {
-		return NGX_OK;
-	} else {
-		if ( conf->log ) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal value in Connection header \"%s\"", value.data);
+	ngx_uint_t i = 0;
+
+	while ( i < value.len ) {
+		/* as per 13.5.1 of RFC2616 only allow Keep-Alive, Proxy-Authenticate, Proxy-Authorization, TE, Trailers, Transfer-Encoding and Upgrade headers in Connection header */
+		if ( ((i+5) <= value.len) && (ngx_strncmp("close", &(value.data[i]), 5) == 0 ) ) {
+			i += 5;
+		} else if ( ((i+10) <= value.len) && (ngx_strncmp("keep-alive", &(value.data[i]), 10) == 0 ) ) {
+			i += 10;
+		} else if ( ((i+10) <= value.len) && (ngx_strncmp("Keep-Alive", &(value.data[i]), 10) == 0 ) ) {
+			i += 10;
+		} else if ( ((i+18) <= value.len) && (ngx_strncmp("Proxy-Authenticate", &(value.data[i]), 18) == 0 ) ) {
+			i += 18;
+		} else if ( ((i+19) <= value.len) && (ngx_strncmp("Proxy-Authorization", &(value.data[i]), 19) == 0 ) ) {
+			i += 19;
+		} else if ( ((i+2) <= value.len) && (ngx_strncmp("TE", &(value.data[i]), 2) == 0 ) ) {
+			i += 2;
+		} else if ( ((i+8) <= value.len) && (ngx_strncmp("Trailers", &(value.data[i]), 8) == 0 ) ) {
+			i += 8;
+		} else if ( ((i+17) <= value.len) && (ngx_strncmp("Transfer-Encoding", &(value.data[i]), 17) == 0 ) ) {
+			i += 17;
+		} else if ( ((i+7) <= value.len) && (ngx_strncmp("Upgrade", &(value.data[i]), 7) == 0 ) ) {
+			i += 7;
+		} else {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal value at position %d in Connection header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
 		}
-		return NGX_ERROR;
+
+		if ( (i < value.len) && (value.data[i] == ' ') ) {
+			i++;
+		}
+
+		if ( i == value.len ) {
+			return NGX_OK;
+		}
+
+		if ( (i < value.len) && (value.data[i] != ',') ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Connection header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+		i++;
+
+		if ( (i < value.len) && (value.data[i] == ' ') ) {
+			i++;
+		}
 	}
+
+	if ( conf->log ) {
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Connection header \"%s\"", value.data);
+	}
+	return NGX_ERROR;
 }
 
 static ngx_int_t ngx_header_inspect_accept_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
