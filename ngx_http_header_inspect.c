@@ -41,6 +41,7 @@ static ngx_int_t ngx_header_inspect_connection_header(ngx_header_inspect_loc_con
 static ngx_int_t ngx_header_inspect_contentrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_useragent_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_upgrade_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_via_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -1436,6 +1437,164 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_via_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i = 0;
+	u_char d;
+	ngx_int_t rc = NGX_OK;
+	enum via_header_states { VS_START, VS_PROT, VS_SLASH, VS_VER, VS_SPACE1, VS_HOST, VS_COLON, VS_PORT, VS_DELIM, VS_SPACE2, VS_PAREN, VS_PARENEND, VS_SPACE3 } state;
+
+	if ( value.len < 3 ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Via header \"%s\" too short", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	state = VS_START;
+	for ( i = 0; i < value.len; i++ ) {
+		d = value.data[i];
+		if ( ((d >= '0') && (d <= '9')) ) {
+			switch ( state ) {
+				case VS_START:
+				case VS_SPACE3:
+					state = VS_PROT;
+					break;
+				case VS_SLASH:
+					state = VS_VER;
+					break;
+				case VS_SPACE1:
+					state = VS_HOST;
+					break;
+				case VS_COLON:
+					state = VS_PORT;
+					break;
+				case VS_PROT:
+				case VS_VER:
+				case VS_PORT:
+				case VS_HOST:
+				case VS_PAREN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (
+			((d >= 'a') && (d <= 'z')) ||
+			((d >= 'A') && (d <= 'Z')) ||
+			(d == '-') || (d == '.')
+		) {
+			switch ( state ) {
+				case VS_START:
+				case VS_SPACE3:
+					state = VS_PROT;
+					break;
+				case VS_SLASH:
+					state = VS_VER;
+					break;
+				case VS_SPACE1:
+					state = VS_HOST;
+					break;
+				case VS_PROT:
+				case VS_VER:
+				case VS_HOST:
+				case VS_PAREN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == ' ') {
+			switch ( state ) {
+				case VS_PROT:
+				case VS_VER:
+					state = VS_SPACE1;
+					break;
+				case VS_HOST:
+				case VS_PORT:
+					state = VS_SPACE2;
+					break;
+				case VS_DELIM:
+					state = VS_SPACE3;
+					break;
+				case VS_SPACE1:
+				case VS_SPACE2:
+				case VS_SPACE3:
+				case VS_PAREN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == '/') {
+			switch ( state ) {
+				case VS_PROT:
+					state = VS_SLASH;
+					break;
+				case VS_PAREN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == ':') {
+			switch ( state ) {
+				case VS_HOST:
+					state = VS_COLON;
+					break;
+				case VS_PAREN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == '(') {
+			switch ( state ) {
+				case VS_SPACE2:
+					state = VS_PAREN;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == ')') {
+			switch ( state ) {
+				case VS_PAREN:
+					state = VS_PARENEND;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == ',') {
+			switch ( state ) {
+				case VS_HOST:
+				case VS_PORT:
+				case VS_PARENEND:
+					state = VS_DELIM;
+					break;
+				case VS_PAREN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else {
+			rc = NGX_ERROR;
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Via header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	switch ( state ) {
+		case VS_HOST:
+		case VS_PORT:
+		case VS_PARENEND:
+			break;
+		default:
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Via header \"%s\"", value.data);
+			}
+			return NGX_ERROR;
+	}
+
+	return NGX_OK;
+}
+
 static ngx_int_t ngx_header_inspect_upgrade_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i = 0;
 	u_char d;
@@ -2201,6 +2360,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 7) && (ngx_strcmp("Upgrade", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_upgrade_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 3) && (ngx_strcmp("Via", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_via_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}

@@ -18,7 +18,7 @@ Limitations
 	Accept-Encoding, Accept-Language, Accept-Charset, Max-Forwards,
 	If-Match, If-None-Match, Last-Modified, Content-Length,
 	Expires, Content-Language, Content-Encoding, Allow, Host,
-	Accept, Connection, Content-Range, User-Agent, Upgrade
+	Accept, Connection, Content-Range, User-Agent, Upgrade, Via
 
 Report Bugs
 	Create a ticket on the issue tracking interface of GitHub:
