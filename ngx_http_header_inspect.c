@@ -40,6 +40,7 @@ static ngx_int_t ngx_header_inspect_accept_header(ngx_header_inspect_loc_conf_t 
 static ngx_int_t ngx_header_inspect_connection_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_contentrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_useragent_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_upgrade_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -1435,6 +1436,94 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_upgrade_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i = 0;
+	u_char d;
+	ngx_int_t rc = NGX_OK;
+	enum upgrade_header_states { UPS_START, UPS_PROD, UPS_SLASH, UPS_VER, UPS_DELIM, UPS_SPACE } state;
+
+	if ( value.len < 1 ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Upgrade header \"%s\" too short", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	state = UPS_START;
+	for ( i = 0; i < value.len ; i++ ) {
+		d = value.data[i];
+
+		if (
+			((d >= '0') && (d <= '9')) ||
+			((d >= 'a') && (d <= 'z')) ||
+			((d >= 'A') && (d <= 'Z')) ||
+			(d == '-') || (d == '.')
+		) {
+			switch ( state ) {
+				case UPS_START:
+				case UPS_SPACE:
+					state = UPS_PROD;
+					break;
+				case UPS_SLASH:
+					state = UPS_VER;
+					break;
+				case UPS_PROD:
+				case UPS_VER:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == '/' ) {
+			switch ( state ) {
+				case UPS_PROD:
+					state = UPS_SLASH;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ' ' ) {
+			switch ( state ) {
+				case UPS_DELIM:
+					state = UPS_SPACE;
+					break;
+				case UPS_SPACE:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ',' ) {
+			switch ( state ) {
+				case UPS_PROD:
+				case UPS_VER:
+					state = UPS_DELIM;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else {
+			rc = NGX_ERROR;
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Upgrade header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	switch ( state ) {
+		case UPS_PROD:
+		case UPS_VER:
+			break;
+		default:
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Upgrade header \"%s\"", value.data);
+			}
+			return NGX_ERROR;
+	}
+
+	return NGX_OK;
+}
+
 static ngx_int_t ngx_header_inspect_useragent_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i = 0;
 	u_char d;
@@ -2107,6 +2196,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 10) && (ngx_strcmp("User-Agent", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_useragent_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 7) && (ngx_strcmp("Upgrade", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_upgrade_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
