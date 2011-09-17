@@ -38,6 +38,7 @@ static ngx_int_t ngx_header_inspect_allow_header(ngx_header_inspect_loc_conf_t *
 static ngx_int_t ngx_header_inspect_host_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_accept_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_connection_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_contentrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -1433,6 +1434,134 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_contentrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i = 0;
+	ngx_int_t rc = NGX_OK;
+	ngx_int_t a,b,c;
+	enum contentrange_header_states {RHS_START, RHS_STAR1, RHS_NUM1,DELIM,RHS_NUM2,RHS_SLASH,RHS_STAR2, RHS_NUM3} state;
+
+	if ( (value.len < 6) || (ngx_strncmp("bytes ", value.data, 6) != 0) ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Range header \"%s\"  does not start with \"bytes \"", value.data);
+		}
+		return NGX_ERROR;
+	}
+	if ( value.len < 9 ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Range header \"%s\" is too short", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	state = RHS_START;
+	a = -1;
+	b = -1;
+	c = -1;
+
+	i = 6; /* start after "bytes " */
+	for ( ; i < value.len ; i++ ) {
+		switch ( value.data[i] ) {
+			case '0':
+			case '1':
+			case '2':
+			case '3':
+			case '4':
+			case '5':
+			case '6':
+			case '7':
+			case '8':
+			case '9':
+				switch ( state ) {
+					case RHS_START:
+						state = RHS_NUM1;
+						a = (value.data[i] - '0');
+						break;
+					case RHS_NUM1:
+						a = a*10+(value.data[i] - '0');
+						break;
+					case RHS_NUM2:
+						b = b*10+(value.data[i] - '0');
+						break;
+					case RHS_NUM3:
+						c = c*10+(value.data[i] - '0');
+						break;
+					case DELIM:
+						state = RHS_NUM2;
+						b = (value.data[i] - '0');
+						break;
+					case RHS_SLASH:
+						state = RHS_NUM3;
+						c = (value.data[i] - '0');
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+				break;
+			case '*':
+				switch ( state ) {
+					case RHS_START:
+						state = RHS_STAR1;
+						break;
+					case RHS_SLASH:
+						state = RHS_STAR2;
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+				break;
+			case '/':
+				switch ( state ) {
+					case RHS_STAR1:
+					case RHS_NUM2:
+						state = RHS_SLASH;
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+				break;
+			case '-':
+				switch ( state ) {
+					case RHS_NUM1:
+						state = DELIM;
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+				break;
+			default:
+				rc = NGX_ERROR;
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Content-Range header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	switch ( state ) {
+		case RHS_NUM3:
+		case RHS_STAR2:
+			break;
+		default:
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Content-Range header \"%s\"", value.data);
+			}
+			return NGX_ERROR;
+	}
+
+	/* in "a-b/c" ensure a < b and b < c if any of them are defined */
+	if ( (a != -1) && (b != -1) ) {
+		if ( (a >= b) || ((c != -1) && (b >= c)) ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal range specification in Content-Range header \"%s\"", value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+
+	return NGX_OK;
+}
+
 static ngx_int_t ngx_header_inspect_connection_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i = 0;
 
@@ -1859,6 +1988,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 10) && (ngx_strcmp("Connection", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_connection_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 13) && (ngx_strcmp("Content-Range", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_contentrange_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
