@@ -43,8 +43,9 @@ static ngx_int_t ngx_header_inspect_useragent_header(ngx_header_inspect_loc_conf
 static ngx_int_t ngx_header_inspect_upgrade_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_via_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_from_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
-static ngx_int_t ngx_header_inspect_pragma_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_pragma_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_contenttype_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
@@ -1439,9 +1440,29 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_contenttype_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t v;
+
+	if ( value.len < 3 ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Content-Type header \"%s\" too short", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	if (ngx_header_inspect_parse_mediatype(value.data, value.len, &v) != NGX_OK) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid media-type in Content-Type header \"%s\"", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	return NGX_OK;
+}
+
 static ngx_int_t ngx_header_inspect_pragma_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	/* currently only the 'known' "no-cache" value is allowed */
-	if ( (value.len == 8) && (ngx_strncasecmp("no-cache", value.data, 8) == 0) ) {
+	if ( (value.len == 8) && (ngx_strncasecmp((u_char *)"no-cache", value.data, 8) == 0) ) {
 		return NGX_OK;
 	} else {
 		if ( conf->log ) {
@@ -2476,6 +2497,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 6) && (ngx_strcmp("Pragma", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_pragma_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 12) && (ngx_strcmp("Content-Type", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_contenttype_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
