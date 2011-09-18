@@ -23,7 +23,7 @@ typedef struct {
 
 
 static ngx_int_t ngx_header_inspect_init(ngx_conf_t *cf);
-static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen);
+static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len);
 static ngx_int_t ngx_header_inspect_parse_base64(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, u_char *data, ngx_uint_t maxlen);
 static ngx_int_t ngx_header_inspect_parse_entity_tag(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len);
 static ngx_int_t ngx_header_inspect_parse_languagerange(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len);
@@ -51,6 +51,7 @@ static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *c
 static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_authorization_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_expect_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -266,11 +267,12 @@ static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *
 	return rc;
 }
 
-static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
-	ngx_uint_t i;
+static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len) {
+	ngx_uint_t i = 0;
 	enum http_date_type {RFC1123, RFC850, ASCTIME} type;
 
 	if ( maxlen < 24 ) {
+		*len = i;
 		return NGX_ERROR;
 	}
 
@@ -292,11 +294,13 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[5] != 'y') ||
 					(data[6] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 7;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else if ((data[0] == 'T') && (data[1] == 'u') && (data[2] == 'e')) {
@@ -318,11 +322,13 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[6] != 'y') ||
 					(data[7] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 8;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else if ((data[0] == 'W') && (data[1] == 'e') && (data[2] == 'd')) {
@@ -346,11 +352,13 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[8] != 'y') ||
 					(data[9] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 10;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else if ((data[0] == 'T') && (data[1] == 'h') && (data[2] == 'u')) {
@@ -373,11 +381,13 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[7] != 'y') ||
 					(data[8] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 9;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else if ((data[0] == 'F') && (data[1] == 'r') && (data[2] == 'i')) {
@@ -398,11 +408,13 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[5] != 'y') ||
 					(data[6] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 7;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else if ((data[0] == 'S') && (data[1] == 'a') && (data[2] == 't')) {
@@ -425,11 +437,13 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[7] != 'y') ||
 					(data[8] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 9;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else if ((data[0] == 'S') && (data[1] == 'u') && (data[2] == 'n')) {
@@ -450,38 +464,46 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 					(data[5] != 'y') ||
 					(data[6] != ',')
 				) {
+					*len = i;
 					return NGX_ERROR;
 				}
 				i = 7;
 				break;
 			default:
+				*len = i;
 				return NGX_ERROR;
 		}
 	} else {
+		*len = i;
 		return NGX_ERROR;
 	}
 
 	switch (type) {
 		case RFC1123:
-			if (maxlen != 29) {
+			if (maxlen < 29) {
+				*len = i;
 				return NGX_ERROR;
 			}
 			break;
 		case RFC850:
-			if (maxlen != 30) {
+			if (maxlen < 30) {
+				*len = i;
 				return NGX_ERROR;
 			}
 			break;
 		case ASCTIME:
-			if (maxlen != 24) {
+			if (maxlen < 24) {
+				*len = i;
 				return NGX_ERROR;
 			}
 			break;
 		default:
+			*len = i;
 			return NGX_ERROR;
 	}
 
 	if (data[i] != ' ') {
+		*len = i;
 		return NGX_ERROR;
 	}
 	i++;
@@ -489,28 +511,34 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 	if (type == RFC1123) {
 	/* rfc1123: day */
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if (data[i] != ' ') {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 	} else if (type == RFC850) {
 	/* rfc850: day */
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if (data[i] != '-') {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
@@ -533,53 +561,64 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 	) {
 		i += 3;
 	} else {
+		*len = i;
 		return NGX_ERROR;
 	}
 
 	if (type == RFC1123) {
 	/* rfc1123: year */
 		if (data[i] != ' ') {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 	} else if (type == RFC850) {
 	/* rfc850: year */
 		if (data[i] != '-') {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 	} else if (type == ASCTIME) {
 	/* asctime: day */
 		if (data[i] != ' ') {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 		if ((data[i] != ' ') || (data[i] < '0') || (data[i] > '9')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i++;
 	}
 	if ((data[i] < '0') || (data[i] > '9')) {
+		*len = i;
 		return NGX_ERROR;
 	}
 	i++;
 	if (data[i] != ' ') {
+		*len = i;
 		return NGX_ERROR;
 	}
 	i++;
@@ -590,6 +629,7 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 		(data[i+1] < '0') || (data[i+1] > '9') ||
 		(data[i+2] != ':')
 	) {
+		*len = i;
 		return NGX_ERROR;
 	}
 	i += 3;
@@ -598,6 +638,7 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 		(data[i+1] < '0') || (data[i+1] > '9') ||
 		(data[i+2] != ':')
 	) {
+		*len = i;
 		return NGX_ERROR;
 	}
 	i += 3;
@@ -606,6 +647,7 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 		(data[i+1] < '0') || (data[i+1] > '9') ||
 		(data[i+2] != ' ')
 	) {
+		*len = i;
 		return NGX_ERROR;
 	}
 	i += 3;
@@ -618,21 +660,20 @@ static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen) {
 			(data[i+2] < '0') || (data[i+2] > '9') ||
 			(data[i+3] < '0') || (data[i+3] > '9')
 		) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i += 4;
 	} else {
 		/* GMT */
 		if ((data[i] != 'G') || (data[i+1] != 'M') || (data[i+2] != 'T')) {
+			*len = i;
 			return NGX_ERROR;
 		}
 		i += 3;
 	}
 
-	if ( i != maxlen ) {
-		return NGX_ERROR;
-	}
-
+	*len = i;
 	return NGX_OK;
 }
 
@@ -1442,6 +1483,162 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	}
 
 	return rc;
+}
+
+static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i;
+	ngx_uint_t v;
+	ngx_int_t rc = NGX_OK;
+	enum warn_header_states { WS_START, WS_CODE1, WS_CODE2, WS_CODE3, WS_SP1, WS_HOST, WS_COLON, WS_PORT, WS_SP2, WS_TXT, WS_TXTE, WS_SP3, WS_DATE, WS_DELIM, WS_SPACE } state;
+	u_char d;
+
+	state = WS_START;
+	for ( i = 0; i < value.len ; i++ ) {
+		d = value.data[i];
+
+		if ( (d >= '0') && (d <= '9') ) {
+			switch ( state ) {
+				case WS_START:
+				case WS_SPACE:
+					state = WS_CODE1;
+					break;
+				case WS_CODE1:
+					state = WS_CODE2;
+					break;
+				case WS_CODE2:
+					state = WS_CODE3;
+					break;
+				case WS_SP1:
+					state = WS_HOST;
+					break;
+				case WS_COLON:
+					state = WS_PORT;
+					break;
+				case WS_HOST:
+				case WS_PORT:
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( ((d >= 'a') && (d <= 'z')) || ((d >= 'A') && (d <= 'Z')) ) {
+			switch ( state ) {
+				case WS_SP1:
+					state = WS_HOST;
+					break;
+				case WS_HOST:
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( (d == '-') || (d == '.') ) {
+			switch ( state ) {
+				case WS_HOST:
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ':' ) {
+			switch ( state ) {
+				case WS_HOST:
+					state = WS_COLON;
+					break;
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ',' ) {
+			switch ( state ) {
+				case WS_DATE:
+				case WS_TXTE:
+					state = WS_DELIM;
+					break;
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ' ' ) {
+			switch ( state ) {
+				case WS_CODE3:
+					state = WS_SP1;
+					break;
+				case WS_HOST:
+				case WS_PORT:
+					state = WS_SP2;
+					break;
+				case WS_TXTE:
+					state = WS_SP3;
+					break;
+				case WS_DELIM:
+					state = WS_SPACE;
+					break;
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == '"' ) {
+			switch ( state ) {
+				case WS_SP2:
+					state = WS_TXT;
+					break;
+				case WS_TXT:
+					state = WS_TXTE;
+					break;
+				case WS_SP3:
+					state = WS_DATE;
+					i++; /* skip qoute */
+					if ( ngx_header_inspect_http_date(&(value.data[i]), value.len-i, &v) != NGX_OK ) {
+						if ( conf->log ) {
+							ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal date at position %d in Warning header \"%s\"", i, value.data);
+						}
+						return NGX_ERROR;
+					}
+					i += v;
+					if ( i >= value.len ) {
+						if ( conf->log ) {
+							ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Warning header \"%s\"", value.data);
+						}
+						return NGX_ERROR;
+					}
+					if ( value.data[i] != '"' ) {
+						rc = NGX_ERROR;
+					}
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else {
+			switch ( state ) {
+				case WS_TXT:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Warning header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	switch ( state ) {
+		case WS_TXTE:
+		case WS_DATE:
+			break;
+		default:
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Warning header \"%s\"", value.data);
+			}
+			return NGX_ERROR;
+	}
+
+	return NGX_OK;
 }
 
 static ngx_int_t ngx_header_inspect_expect_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
@@ -2548,11 +2745,18 @@ static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t
 }
 
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value) {
+	ngx_uint_t v;
 
 	/* HTTP-date */
-	if ( ngx_header_inspect_http_date(value.data, value.len) != NGX_OK ) {
+	if ( ngx_header_inspect_http_date(value.data, value.len, &v) != NGX_OK ) {
 		if ( conf->log ) {
 			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid HTTP-date in \"%s\" header \"%s\"", header, value.data);
+		}
+		return NGX_ERROR;
+	}
+	if ( value.len != v ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: trailing characters in \"%s\" header \"%s\"", header, value.data);
 		}
 		return NGX_ERROR;
 	}
@@ -2728,6 +2932,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 6) && (ngx_strcmp("Expect", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_expect_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 7) && (ngx_strcmp("Warning", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_warning_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
