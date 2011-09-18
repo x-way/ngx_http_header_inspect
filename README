@@ -19,7 +19,8 @@ Limitations
 	If-Match, If-None-Match, Last-Modified, Content-Length,
 	Expires, Content-Language, Content-Encoding, Allow, Host,
 	Accept, Connection, Content-Range, User-Agent, Upgrade, Via,
-	From, Pragma, Content-Type, Content-MD5, Authorization, Expect
+	From, Pragma, Content-Type, Content-MD5, Authorization, Expect,
+	Proxy-Authorization
 
 Report Bugs
 	Create a ticket on the issue tracking interface of GitHub:
