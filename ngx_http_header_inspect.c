@@ -42,6 +42,7 @@ static ngx_int_t ngx_header_inspect_contentrange_header(ngx_header_inspect_loc_c
 static ngx_int_t ngx_header_inspect_useragent_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_upgrade_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_via_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_from_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
@@ -1437,6 +1438,93 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_from_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i = 0;
+	u_char d;
+	ngx_int_t rc = NGX_OK;
+	enum from_header_states { FS_START, FS_LOCALPART, FS_AT, FS_DOMAIN, FS_DOT } state;
+
+	if ( value.len < 3 ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: From header \"%s\" too short", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	state = FS_START;
+	for ( i = 0; i < value.len; i++ ) {
+		d = value.data[i];
+		if (
+			((d >= '0') && (d <= '9')) ||
+			((d >= 'a') && (d <= 'z')) ||
+			((d >= 'A') && (d <= 'Z')) ||
+			(d == '-')
+		) {
+			switch ( state ) {
+				case FS_START:
+					state = FS_LOCALPART;
+					break;
+				case FS_AT:
+				case FS_DOT:
+					state = FS_DOMAIN;
+					break;
+				case FS_LOCALPART:
+				case FS_DOMAIN:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == '+') {
+			switch ( state ) {
+				case FS_START:
+					state = FS_LOCALPART;
+					break;
+				case FS_LOCALPART:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == '.') {
+			switch ( state ) {
+				case FS_START:
+					state = FS_LOCALPART;
+					break;
+				case FS_LOCALPART:
+					break;
+				case FS_DOMAIN:
+					state = FS_DOT;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if (d == '@') {
+			switch ( state ) {
+				case FS_LOCALPART:
+					state = FS_AT;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else {
+			rc = NGX_ERROR;
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in From header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	if ( state != FS_DOMAIN ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of From header \"%s\"", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	return NGX_OK;
+}
+
 static ngx_int_t ngx_header_inspect_via_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i = 0;
 	u_char d;
@@ -2365,6 +2453,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 3) && (ngx_strcmp("Via", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_via_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 4) && (ngx_strcmp("From", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_from_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
