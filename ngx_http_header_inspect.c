@@ -24,6 +24,7 @@ typedef struct {
 
 static ngx_int_t ngx_header_inspect_init(ngx_conf_t *cf);
 static ngx_int_t ngx_header_inspect_http_date(u_char *data, ngx_uint_t maxlen);
+static ngx_int_t ngx_header_inspect_parse_base64(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, u_char *data, ngx_uint_t maxlen);
 static ngx_int_t ngx_header_inspect_parse_entity_tag(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len);
 static ngx_int_t ngx_header_inspect_parse_languagerange(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len);
 static ngx_int_t ngx_header_inspect_range_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
@@ -46,8 +47,9 @@ static ngx_int_t ngx_header_inspect_from_header(ngx_header_inspect_loc_conf_t *c
 static ngx_int_t ngx_header_inspect_ifrange_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_pragma_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_contenttype_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
-static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_date_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, char *header, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_authorization_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -1441,19 +1443,159 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
-static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+static ngx_int_t ngx_header_inspect_authorization_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i;
+	ngx_int_t rc = NGX_OK;
+	enum digest_header_states { DS_START, DS_KEY, DS_EQ, DS_VAL, DS_VALQ, DS_VALQE, DS_DELIM, DS_SPACE } state;
 	u_char d;
 
 	if ( value.len == 0 ) {
+		return NGX_OK;
+	}
+
+	if ( (value.len >= 6) && (ngx_strncmp("Basic ", value.data, 6) == 0) ) {
+		return ngx_header_inspect_parse_base64("Basic Authorization", conf, log, &(value.data[6]), value.len-6);
+	}
+
+	if ( (value.len >= 7) && (ngx_strncmp("Digest ", value.data, 7) == 0) ) {
+		i = 7; /* start after "Digest " */
+		state = DS_START;
+		for ( ; i < value.len; i++ ) {
+			d = value.data[i];
+
+			if ( (d >= 'a') && (d <= 'z') ) {
+				switch ( state ) {
+					case DS_START:
+					case DS_SPACE:
+						state = DS_KEY;
+						if (
+							!(
+								(((value.len-i) >= 8) && (ngx_strncmp("username", &(value.data[i]), 8) == 0)) ||
+								(((value.len-i) >= 5) && (ngx_strncmp("realm", &(value.data[i]), 5) == 0)) ||
+								(((value.len-i) >= 5) && (ngx_strncmp("nonce", &(value.data[i]), 5) == 0)) ||
+								(((value.len-i) >= 3) && (ngx_strncmp("uri", &(value.data[i]), 3) == 0)) ||
+								(((value.len-i) >= 8) && (ngx_strncmp("response", &(value.data[i]), 8) == 0)) ||
+								(((value.len-i) >= 9) && (ngx_strncmp("algorithm", &(value.data[i]), 9) == 0)) ||
+								(((value.len-i) >= 6) && (ngx_strncmp("cnonce", &(value.data[i]), 6) == 0)) ||
+								(((value.len-i) >= 6) && (ngx_strncmp("opaque", &(value.data[i]), 6) == 0)) ||
+								(((value.len-i) >= 3) && (ngx_strncmp("qop", &(value.data[i]), 3) == 0)) ||
+								(((value.len-i) >= 2) && (ngx_strncmp("nc", &(value.data[i]), 2) == 0))
+							)
+						) {
+							if ( conf->log ) {
+								ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unknown auth-param at position %d in Authorization header \"%s\"", i, value.data);
+							}
+							return NGX_ERROR;
+						}
+						break;
+					case DS_EQ:
+						state = DS_VAL;
+						break;
+					case DS_VAL:
+					case DS_VALQ:
+					case DS_KEY:
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+			} else if ( d == ',' ) {
+				switch ( state ) {
+					case DS_VAL:
+					case DS_VALQE:
+					case DS_EQ:
+						state = DS_DELIM;
+						break;
+					case DS_VALQ:
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+			} else if ( d == '=' ) {
+				switch ( state ) {
+					case DS_KEY:
+						state = DS_EQ;
+						break;
+					case DS_VALQ:
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+
+			} else if ( d == ' ' ) {
+				switch ( state ) {
+					case DS_DELIM:
+						state = DS_SPACE;
+						break;
+					case DS_VALQ:
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+			} else if ( d == '"' ) {
+				switch ( state ) {
+					case DS_EQ:
+						state = DS_VALQ;
+						break;
+					case DS_VALQ:
+						state = DS_VALQE;
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+			} else if ( (d != '"') ) {
+				switch ( state ) {
+					case DS_VAL:
+					case DS_VALQ:
+						break;
+					default:
+						rc = NGX_ERROR;
+				}
+			} else {
+				rc = NGX_ERROR;
+			}
+			if ( rc == NGX_ERROR ) {
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Authorization header \"%s\"", i, value.data);
+				}
+				return NGX_ERROR;
+			}
+		}
+		switch ( state ) {
+			case DS_VALQE:
+			case DS_VAL:
+				break;
+			default:
+				if ( conf->log ) {
+					ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Authorization header \"%s\"", value.data);
+				}
+				return NGX_ERROR;
+		}
+		return NGX_OK;
+	}
+
+	if ( conf->log ) {
+		ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unknown auth-scheme in Authorization header \"%s\"", value.data);
+	}
+	return NGX_ERROR;
+}
+
+static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	return ngx_header_inspect_parse_base64("Content-MD5", conf, log, value.data, value.len);
+}
+
+static ngx_int_t ngx_header_inspect_parse_base64(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, u_char *data, ngx_uint_t maxlen) {
+	ngx_uint_t i;
+	u_char d;
+
+	if ( maxlen == 0 ) {
 		if ( conf->log ) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: empty Content-MD5 header");
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: empty base64 value in %s header", header);
 		}
 		return NGX_ERROR;
 	}
 
-	for ( i = 0; i < value.len; i++ ) {
-		d = value.data[i];
+	for ( i = 0; i < maxlen; i++ ) {
+		d = data[i];
 
 		if ( (d >= '0') && (d <= '9') ) {
 			continue;
@@ -1468,11 +1610,12 @@ static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_con
 			continue;
 		}
 		if ( d == '=' ) {
+			continue;
 			i++;
-			while ( i < value.len ) {
-				if ( value.data[i] != '=' ) {
+			while ( i < maxlen ) {
+				if ( data[i] != '=' ) {
 					if ( conf->log ) {
-						ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: trailing characters at position %d in Content-MD5 header \"%s\"", i, value.data);
+						ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: trailing characters at position %d in base64 value \"%s\" of %s header", i, data, header);
 					}
 					return NGX_ERROR;
 				}
@@ -1481,7 +1624,7 @@ static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_con
 			break;
 		}
 		if ( conf->log ) {
-			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Content-MD5 header \"%s\"", i, value.data);
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in base64 value \"%s\" of %s header", i, data, header);
 		}
 		return NGX_ERROR;
 	}
@@ -2556,6 +2699,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 11) && (ngx_strcmp("Content-MD5", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_contentmd5_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 13) && (ngx_strcmp("Authorization", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_authorization_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
