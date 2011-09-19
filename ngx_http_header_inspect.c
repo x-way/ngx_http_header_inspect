@@ -53,6 +53,7 @@ static ngx_int_t ngx_header_inspect_authorization_header(char* header, ngx_heade
 static ngx_int_t ngx_header_inspect_expect_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -1486,12 +1487,156 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
+static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i;
+	ngx_int_t rc = NGX_OK;
+	enum transferencoding_header_states { TS_START, TS_FIELD, TS_PARDELIM, TS_PARKEY, TS_PAREQ, TS_PARVAL, TS_PARVALQ, TS_PARVALQE, TS_DELIM, TS_SPACE } state;
+	u_char d;
+
+	state = TS_START;
+	for ( i = 0; i < value.len; i++ ) {
+		d = value.data[i];
+
+		if (
+			((d >= 'a') && (d <= 'z')) ||
+			((d >= 'A') && (d <= 'Z')) ||
+			((d >= '0') && (d <= '9'))
+		) {
+			switch ( state ) {
+				case TS_START:
+				case TS_SPACE:
+					/* ensure transfer-codings is one of chunked, compress, deflate, gzip or identity */
+					state = TS_FIELD;
+					if (
+						!(
+							((value.len-i>=7) && (ngx_strncmp("chunked", &(value.data[i]),7) == 0) && ((value.data[i+7] == ',')||(value.data[i+7] == ';')||(value.data[i+7] == '\0'))) ||
+							((value.len-i>=8) && (ngx_strncmp("compress", &(value.data[i]),8) == 0) && ((value.data[i+8] == ',')||(value.data[i+8] == ';')||(value.data[i+8] == '\0'))) ||
+							((value.len-i>=7) && (ngx_strncmp("deflate", &(value.data[i]),7) == 0) && ((value.data[i+7] == ',')||(value.data[i+7] == ';')||(value.data[i+7] == '\0'))) ||
+							((value.len-i>=4) && (ngx_strncmp("gzip", &(value.data[i]),4) == 0) && ((value.data[i+4] == ',')||(value.data[i+4] == ';')||(value.data[i+4] == '\0'))) ||
+							((value.len-i>=8) && (ngx_strncmp("identity", &(value.data[i]),8) == 0) && ((value.data[i+8] == ',')||(value.data[i+8] == ';')||(value.data[i+8] == '\0')))
+						)
+					) {
+						if ( conf->log ) {
+							ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal field at position %d in Transfer-Encoding header \"%s\"", i, value.data);
+						}
+						return NGX_ERROR;
+					}
+					break;
+				case TS_PARDELIM:
+					/* TODO: if parkey is 'q', validate q-value */
+					state = TS_PARKEY;
+					break;
+				case TS_PAREQ:
+					state = TS_PARVAL;
+					break;
+				case TS_FIELD:
+				case TS_PARKEY:
+				case TS_PARVAL:
+				case TS_PARVALQ:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == '.' ) {
+			switch ( state ) {
+				case TS_PARVAL:
+				case TS_PARVALQ:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ',' ) {
+			switch ( state ) {
+				case TS_FIELD:
+				case TS_PARVAL:
+				case TS_PARVALQE:
+					state = TS_DELIM;
+					break;
+				case TS_PARVALQ:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ' ' ) {
+			switch ( state ) {
+				case TS_DELIM:
+					state = TS_SPACE;
+					break;
+				case TS_PARVAL:
+				case TS_PARVALQ:
+				case TS_PARDELIM:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ';' ) {
+			switch ( state ) {
+				case TS_FIELD:
+				case TS_PARVAL:
+				case TS_PARVALQE:
+					state = TS_PARDELIM;
+					break;
+				case TS_PARVALQ:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == '=' ) {
+			switch ( state ) {
+				case TS_PARKEY:
+					state = TS_PAREQ;
+					break;
+				case TS_PARVALQ:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == '"' ) {
+			switch ( state ) {
+				case TS_PAREQ:
+					state = TS_PARVALQ;
+					break;
+				case TS_PARVALQ:
+					state = TS_PARVALQE;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else {
+			switch ( state ) {
+				case TS_PARVALQ:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Transfer-Encoding header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	switch ( state ) {
+		case TS_FIELD:
+		case TS_PARVAL:
+		case TS_PARVALQE:
+			break;
+		default:
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Transfer-Encoding header \"%s\"", value.data);
+			}
+			return NGX_ERROR;
+	}
+
+	return NGX_OK;
+}
+
 static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i;
 	ngx_int_t rc = NGX_OK;
 	enum trail_header_states { TS_START, TS_FIELD, TS_DELIM, TS_SPACE } state;
 	u_char d;
-
 
 	state = TS_START;
 	for ( i = 0; i < value.len; i++ ) {
@@ -3017,6 +3162,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 7) && (ngx_strcmp("Trailer", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_trailer_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 17) && (ngx_strcmp("Transfer-Encoding", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_transferencoding_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
