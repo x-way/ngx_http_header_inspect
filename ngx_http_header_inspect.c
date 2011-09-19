@@ -1681,16 +1681,16 @@ static ngx_int_t ngx_header_inspect_authorization_header(char* header, ngx_heade
 						state = DS_KEY;
 						if (
 							!(
-								(((value.len-i) >= 8) && (ngx_strncmp("username", &(value.data[i]), 8) == 0)) ||
-								(((value.len-i) >= 5) && (ngx_strncmp("realm", &(value.data[i]), 5) == 0)) ||
-								(((value.len-i) >= 5) && (ngx_strncmp("nonce", &(value.data[i]), 5) == 0)) ||
-								(((value.len-i) >= 3) && (ngx_strncmp("uri", &(value.data[i]), 3) == 0)) ||
-								(((value.len-i) >= 8) && (ngx_strncmp("response", &(value.data[i]), 8) == 0)) ||
-								(((value.len-i) >= 9) && (ngx_strncmp("algorithm", &(value.data[i]), 9) == 0)) ||
-								(((value.len-i) >= 6) && (ngx_strncmp("cnonce", &(value.data[i]), 6) == 0)) ||
-								(((value.len-i) >= 6) && (ngx_strncmp("opaque", &(value.data[i]), 6) == 0)) ||
-								(((value.len-i) >= 3) && (ngx_strncmp("qop", &(value.data[i]), 3) == 0)) ||
-								(((value.len-i) >= 2) && (ngx_strncmp("nc", &(value.data[i]), 2) == 0))
+								(((value.len-i) >= 9) && (ngx_strncmp("username=", &(value.data[i]), 9) == 0)) ||
+								(((value.len-i) >= 6) && (ngx_strncmp("realm=", &(value.data[i]), 6) == 0)) ||
+								(((value.len-i) >= 6) && (ngx_strncmp("nonce=", &(value.data[i]), 6) == 0)) ||
+								(((value.len-i) >= 4) && (ngx_strncmp("uri=", &(value.data[i]), 4) == 0)) ||
+								(((value.len-i) >= 9) && (ngx_strncmp("response=", &(value.data[i]), 9) == 0)) ||
+								(((value.len-i) >= 10) && (ngx_strncmp("algorithm=", &(value.data[i]), 10) == 0)) ||
+								(((value.len-i) >= 7) && (ngx_strncmp("cnonce=", &(value.data[i]), 7) == 0)) ||
+								(((value.len-i) >= 7) && (ngx_strncmp("opaque=", &(value.data[i]), 7) == 0)) ||
+								(((value.len-i) >= 4) && (ngx_strncmp("qop=", &(value.data[i]), 4) == 0)) ||
+								(((value.len-i) >= 3) && (ngx_strncmp("nc=", &(value.data[i]), 3) == 0))
 							)
 						) {
 							if ( conf->log ) {
