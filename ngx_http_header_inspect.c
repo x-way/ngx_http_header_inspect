@@ -53,7 +53,7 @@ static ngx_int_t ngx_header_inspect_authorization_header(char* header, ngx_heade
 static ngx_int_t ngx_header_inspect_expect_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
-static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_transferencoding_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -1487,11 +1487,16 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	return rc;
 }
 
-static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+static ngx_int_t ngx_header_inspect_transferencoding_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
 	ngx_uint_t i;
 	ngx_int_t rc = NGX_OK;
 	enum transferencoding_header_states { TS_START, TS_FIELD, TS_PARDELIM, TS_PARKEY, TS_PAREQ, TS_PARVAL, TS_PARVALQ, TS_PARVALQE, TS_DELIM, TS_SPACE } state;
 	u_char d;
+	ngx_uint_t te_header = 0;
+
+	if ( ngx_strncmp("TE", header, 2) == 0 ) {
+		te_header = 1;
+	}
 
 	state = TS_START;
 	for ( i = 0; i < value.len; i++ ) {
@@ -1513,11 +1518,12 @@ static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_l
 							((value.len-i>=8) && (ngx_strncmp("compress", &(value.data[i]),8) == 0) && ((value.data[i+8] == ',')||(value.data[i+8] == ';')||(value.data[i+8] == '\0'))) ||
 							((value.len-i>=7) && (ngx_strncmp("deflate", &(value.data[i]),7) == 0) && ((value.data[i+7] == ',')||(value.data[i+7] == ';')||(value.data[i+7] == '\0'))) ||
 							((value.len-i>=4) && (ngx_strncmp("gzip", &(value.data[i]),4) == 0) && ((value.data[i+4] == ',')||(value.data[i+4] == ';')||(value.data[i+4] == '\0'))) ||
-							((value.len-i>=8) && (ngx_strncmp("identity", &(value.data[i]),8) == 0) && ((value.data[i+8] == ',')||(value.data[i+8] == ';')||(value.data[i+8] == '\0')))
+							((value.len-i>=8) && (ngx_strncmp("identity", &(value.data[i]),8) == 0) && ((value.data[i+8] == ',')||(value.data[i+8] == ';')||(value.data[i+8] == '\0'))) ||
+							((te_header == 1) && (value.len-i>=8) && (ngx_strncmp("trailers", &(value.data[i]),8) == 0) && ((value.data[i+8] == ',')||(value.data[i+8] == ';')||(value.data[i+8] == '\0')))
 						)
 					) {
 						if ( conf->log ) {
-							ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal field at position %d in Transfer-Encoding header \"%s\"", i, value.data);
+							ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal field at position %d in %s header \"%s\"", i, header, value.data);
 						}
 						return NGX_ERROR;
 					}
@@ -1612,7 +1618,7 @@ static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_l
 		}
 		if ( rc == NGX_ERROR ) {
 			if ( conf->log ) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Transfer-Encoding header \"%s\"", i, value.data);
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in %s header \"%s\"", i, header, value.data);
 			}
 			return NGX_ERROR;
 		}
@@ -1622,9 +1628,13 @@ static ngx_int_t ngx_header_inspect_transferencoding_header(ngx_header_inspect_l
 		case TS_PARVAL:
 		case TS_PARVALQE:
 			break;
+		case TS_START:
+			if ( te_header == 1 ) {
+				break;
+			}
 		default:
 			if ( conf->log ) {
-				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Transfer-Encoding header \"%s\"", value.data);
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of %s header \"%s\"", header, value.data);
 			}
 			return NGX_ERROR;
 	}
@@ -3166,7 +3176,12 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
 				} else if ((h[i].key.len == 17) && (ngx_strcmp("Transfer-Encoding", h[i].key.data) == 0) ) {
-					rc = ngx_header_inspect_transferencoding_header(conf, r->connection->log, h[i].value);
+					rc = ngx_header_inspect_transferencoding_header("Transfer-Encoding", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 2) && (ngx_strcmp("TE", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_transferencoding_header("TE", conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}

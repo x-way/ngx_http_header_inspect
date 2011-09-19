@@ -20,7 +20,7 @@ Limitations
 	Expires, Content-Language, Content-Encoding, Allow, Host,
 	Accept, Connection, Content-Range, User-Agent, Upgrade, Via,
 	From, Pragma, Content-Type, Content-MD5, Authorization, Expect,
-	Proxy-Authorization, Warning, Trailer, Transfer-Encoding
+	Proxy-Authorization, Warning, Trailer, Transfer-Encoding, TE
 
 Report Bugs
 	Create a ticket on the issue tracking interface of GitHub:
