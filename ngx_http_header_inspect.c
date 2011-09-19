@@ -52,6 +52,7 @@ static ngx_int_t ngx_header_inspect_contentmd5_header(ngx_header_inspect_loc_con
 static ngx_int_t ngx_header_inspect_authorization_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_expect_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -1483,6 +1484,80 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	}
 
 	return rc;
+}
+
+static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_uint_t i;
+	ngx_int_t rc = NGX_OK;
+	enum trail_header_states { TS_START, TS_FIELD, TS_DELIM, TS_SPACE } state;
+	u_char d;
+
+
+	state = TS_START;
+	for ( i = 0; i < value.len; i++ ) {
+		d = value.data[i];
+
+		if (
+			((d >= 'a') && (d <= 'z')) ||
+			((d >= 'A') && (d <= 'Z')) ||
+			((d >= '0') && (d <= '9')) ||
+			(d == '-')
+		) {
+			switch ( state ) {
+				case TS_START:
+				case TS_SPACE:
+					/* ensure field is not Transfer-Encondig, Content-Length or Trailer */
+					if (
+						(((value.len-i)>=17) && (ngx_strncmp("Transfer-Encoding", &(value.data[i]), 17) == 0) && ((value.data[i+17] == ',') || (value.data[i+17] == '\0'))) ||
+						(((value.len-i)>=14) && (ngx_strncmp("Content-Length", &(value.data[i]), 14) == 0) && ((value.data[i+14] == ',') || (value.data[i+14] == '\0'))) ||
+						(((value.len-i)>=7) && (ngx_strncmp("Trailer", &(value.data[i]), 7) == 0) && ((value.data[i+7] == ',') || (value.data[i+7] == '\0')))
+					) {
+						if ( conf->log ) {
+							ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal field at position %d in Trailer header \"%s\"", i, value.data);
+						}
+						return NGX_ERROR;
+					}
+					state = TS_FIELD;
+					break;
+				case TS_FIELD:
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ',' ) {
+			switch ( state ) {
+				case TS_FIELD:
+					state = TS_DELIM;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else if ( d == ' ' ) {
+			switch ( state ) {
+				case TS_DELIM:
+					state = TS_SPACE;
+					break;
+				default:
+					rc = NGX_ERROR;
+			}
+		} else {
+			rc = NGX_ERROR;
+		}
+		if ( rc == NGX_ERROR ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d in Trailer header \"%s\"", i, value.data);
+			}
+			return NGX_ERROR;
+		}
+	}
+	if ( state != TS_FIELD ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Trailer header \"%s\"", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	return NGX_OK;
 }
 
 static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
@@ -2937,6 +3012,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 7) && (ngx_strcmp("Warning", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_warning_header(conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 7) && (ngx_strcmp("Trailer", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_trailer_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
