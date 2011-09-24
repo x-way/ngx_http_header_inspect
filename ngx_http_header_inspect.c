@@ -54,6 +54,7 @@ static ngx_int_t ngx_header_inspect_expect_header(ngx_header_inspect_loc_conf_t 
 static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_transferencoding_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_referer_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -1485,6 +1486,209 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	}
 
 	return rc;
+}
+
+static ngx_int_t ngx_header_inspect_referer_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	enum referer_header_states { RS_START, RS_SCHEME, RS_COLON, RS_SLASH1, RS_SLASH2, RS_HOST, RS_BR1, RS_IP6, RS_BR2, RS_COLON2, RS_PORT, RS_PATH } state;
+	ngx_uint_t i;
+	ngx_int_t rc = NGX_OK;
+	u_char d;
+
+	if ( value.len < 1 ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: %s header \"%s\" too short", header, value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	switch ( value.data[0] ) {
+		case '/':
+			/* relativePath */
+			return NGX_OK;
+			break;
+		case 'h':
+		case 'f':
+			/* absoluteURI */
+			state = RS_START;
+			for ( i = 0; i < value.len ; i++ ) {
+				d = value.data[i];
+
+				if (
+					((d >= 'g') && (d <= 'z')) ||
+					((d >= 'G') && (d <= 'Z')) ||
+					(d == '.')
+				) {
+					switch ( state ) {
+						case RS_START:
+							if (
+								!(
+								((value.len > 4) && (ngx_strncmp("http:", value.data, 5) == 0)) ||
+								((value.len > 5) && (ngx_strncmp("https:", value.data, 6) == 0)) ||
+								((value.len > 3) && (ngx_strncmp("ftp:", value.data, 4) == 0)) ||
+								((value.len > 4) && (ngx_strncmp("ftps:", value.data, 5) == 0))
+								)
+							) {
+								if ( conf->log ) {
+									ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unknown scheme at begin of %s header \"%s\"", header, value.data);
+								}
+								return NGX_ERROR;
+							}
+							state = RS_SCHEME;
+							break;
+						case RS_SLASH2:
+							state = RS_HOST;
+							break;
+						case RS_HOST:
+						case RS_PATH:
+						case RS_SCHEME:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else if (
+					((d >= 'a') && (d <= 'f')) ||
+					((d >= 'A') && (d <= 'F'))
+				) {
+					switch ( state ) {
+						case RS_START:
+							if (
+								!(
+								((value.len > 4) && (ngx_strncmp("http:", value.data, 5) == 0)) ||
+								((value.len > 5) && (ngx_strncmp("https:", value.data, 6) == 0)) ||
+								((value.len > 3) && (ngx_strncmp("ftp:", value.data, 4) == 0)) ||
+								((value.len > 4) && (ngx_strncmp("ftps:", value.data, 5) == 0))
+								)
+							) {
+								if ( conf->log ) {
+									ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unknown scheme at begin of %s header \"%s\"", header, value.data);
+								}
+								return NGX_ERROR;
+							}
+							state = RS_SCHEME;
+							break;
+						case RS_SLASH2:
+							state = RS_HOST;
+							break;
+						case RS_BR1:
+							state = RS_IP6;
+							break;
+						case RS_HOST:
+						case RS_PATH:
+						case RS_SCHEME:
+						case RS_IP6:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else if ( (d >= '0') && (d <= '9') ) {
+					switch ( state ) {
+						case RS_SLASH2:
+							state = RS_HOST;
+							break;
+						case RS_COLON2:
+							state = RS_PORT;
+							break;
+						case RS_BR1:
+							state = RS_IP6;
+							break;
+						case RS_PORT:
+						case RS_HOST:
+						case RS_PATH:
+						case RS_IP6:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else if ( d == '/' ) {
+					switch ( state ) {
+						case RS_COLON:
+							state = RS_SLASH1;
+							break;
+						case RS_SLASH1:
+							state = RS_SLASH2;
+							break;
+						case RS_PORT:
+						case RS_HOST:
+						case RS_BR2:
+							state = RS_PATH;
+							break;
+						case RS_PATH:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else if ( d == ':' ) {
+					switch ( state ) {
+						case RS_SCHEME:
+							state = RS_COLON;
+							break;
+						case RS_HOST:
+						case RS_BR2:
+							state = RS_COLON2;
+							break;
+						case RS_BR1:
+							state = RS_IP6;
+							break;
+						case RS_PATH:
+						case RS_IP6:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else if ( d == '[' ) {
+					switch ( state ) {
+						case RS_SLASH2:
+							state = RS_BR1;
+							break;
+						case RS_PATH:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else if ( d == ']' ) {
+					switch ( state ) {
+						case RS_IP6:
+							state = RS_BR2;
+							break;
+						case RS_PATH:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				} else {
+					switch ( state ) {
+						case RS_PATH:
+							break;
+						default:
+							rc = NGX_ERROR;
+					}
+				}
+				if ( rc == NGX_ERROR ) {
+					if ( conf->log ) {
+						ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at position %d of %s header \"%s\"", i, header, value.data);
+					}
+					return NGX_ERROR;
+				}
+			}
+			switch ( state ) {
+				case RS_PATH:
+				case RS_PORT:
+				case RS_HOST:
+				case RS_BR2:
+					return NGX_OK;
+				default:
+					if ( conf->log ) {
+						ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of %s header \"%s\"", header, value.data);
+					}
+					return NGX_ERROR;
+			}
+			break;
+		default:
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal character at begin of %s header \"%s\"", header, value.data);
+			}
+			return NGX_ERROR;
+	}
 }
 
 static ngx_int_t ngx_header_inspect_transferencoding_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
@@ -3182,6 +3386,16 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 2) && (ngx_strcmp("TE", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_transferencoding_header("TE", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 7) && (ngx_strcmp("Referer", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_referer_header("Referer", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 16) && (ngx_strcmp("Content-Location", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_referer_header("Content-Location", conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
