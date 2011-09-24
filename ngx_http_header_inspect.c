@@ -55,6 +55,7 @@ static ngx_int_t ngx_header_inspect_warning_header(ngx_header_inspect_loc_conf_t
 static ngx_int_t ngx_header_inspect_trailer_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_transferencoding_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_referer_header(char* header, ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
+static ngx_int_t ngx_header_inspect_cachecontrol_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value);
 static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r);
 
 static void *ngx_header_inspect_create_conf(ngx_conf_t *cf);
@@ -1481,6 +1482,107 @@ static ngx_int_t ngx_header_inspect_acceptencoding_header(ngx_header_inspect_loc
 	if (rc == NGX_AGAIN) {
 		if ( conf->log ) {
 			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Accept-Encoding header \"%s\"", value.data);
+		}
+		rc = NGX_ERROR;
+	}
+
+	return rc;
+}
+
+static ngx_int_t ngx_header_inspect_parse_cache_directive(u_char *data, ngx_uint_t maxlen, ngx_uint_t *len) {
+	ngx_uint_t i = 0;
+	if ( (maxlen >= 8) && (ngx_strncmp("no-cache", data, 8) == 0) ) {
+		*len = 8;
+		return NGX_OK;
+	}
+	if ( (maxlen >= 8) && (ngx_strncmp("no-store", data, 8) == 0) ) {
+		*len = 8;
+		return NGX_OK;
+	}
+	if ( (maxlen >= 12) && (ngx_strncmp("no-transform", data, 12) == 0) ) {
+		*len = 12;
+		return NGX_OK;
+	}
+	if ( (maxlen >= 14) && (ngx_strncmp("only-if-cached", data, 14) == 0) ) {
+		*len = 14;
+		return NGX_OK;
+	}
+	if ( (maxlen >= 9) && (ngx_strncmp("max-stale", data, 9) == 0) ) {
+		*len = 9;
+		if ( maxlen >= 11 ) {
+			if ( (data[9] == '=') && (data[10] >= '0') && (data[10] <= '9') ) {
+				i = 11;
+				while ( (i <= maxlen) && (data[i] >= '0') && (data[i] <= '9') ) {
+					i++;
+				}
+				*len = i;
+			}
+		}
+		return NGX_OK;
+	}
+	if ( (maxlen >= 9) && (ngx_strncmp("max-age=", data, 8) == 0) && (data[8] >= '0') && (data[8] <= '9') ) {
+		i = 9;
+		while ( (i < maxlen) && (data[i] >= '0') &&(data[i] <= '9') ) {
+			i++;
+		}
+		*len = i;
+		return NGX_OK;
+	}
+	if ( (maxlen >= 11) && (ngx_strncmp("min-fresh=", data, 10) == 0) && (data[10] >= '0') && (data[10] <= '9') ) {
+		i = 11;
+		while ( (i < maxlen) && (data[i] >= '0') &&(data[i] <= '9') ) {
+			i++;
+		}
+		*len = i;
+		return NGX_OK;
+	}
+
+	return NGX_ERROR;
+}
+
+static ngx_int_t ngx_header_inspect_cachecontrol_header(ngx_header_inspect_loc_conf_t *conf, ngx_log_t *log, ngx_str_t value) {
+	ngx_int_t rc = NGX_AGAIN;
+	ngx_uint_t i = 0;
+	ngx_uint_t v;
+
+	if (value.len < 1) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: Cache-Control header \"%s\" too short", value.data);
+		}
+		return NGX_ERROR;
+	}
+
+	while ( i < value.len ) {
+		if ( ngx_header_inspect_parse_cache_directive(&(value.data[i]), value.len-i, &v) != NGX_OK ) {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: invalid cache-directive at position %d in Cache-Control header \"%s\"", i, value.data);
+			}
+			rc = NGX_ERROR;
+			break;
+		}
+		i += v;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+		if (i == value.len) {
+			rc = NGX_OK;
+			break;
+		}
+		if (value.data[i] != ',') {
+			if ( conf->log ) {
+				ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: illegal char at position %d in Cache-Control header \"%s\"", i, value.data);
+			}
+			rc = NGX_ERROR;
+			break;
+		}
+		i++;
+		if ((value.data[i] == ' ') && (i < value.len)) {
+			i++;
+		}
+	}
+	if ( rc == NGX_AGAIN ) {
+		if ( conf->log ) {
+			ngx_log_error(NGX_LOG_ALERT, log, 0, "header_inspect: unexpected end of Cache-Control header \"%s\"", value.data);
 		}
 		rc = NGX_ERROR;
 	}
@@ -3396,6 +3498,11 @@ static ngx_int_t ngx_header_inspect_process_request(ngx_http_request_t *r) {
 					}
 				} else if ((h[i].key.len == 16) && (ngx_strcmp("Content-Location", h[i].key.data) == 0) ) {
 					rc = ngx_header_inspect_referer_header("Content-Location", conf, r->connection->log, h[i].value);
+					if ((rc != NGX_OK) && conf->block) {
+						return NGX_HTTP_BAD_REQUEST;
+					}
+				} else if ((h[i].key.len == 13) && (ngx_strcmp("Cache-Control", h[i].key.data) == 0) ) {
+					rc = ngx_header_inspect_cachecontrol_header(conf, r->connection->log, h[i].value);
 					if ((rc != NGX_OK) && conf->block) {
 						return NGX_HTTP_BAD_REQUEST;
 					}
